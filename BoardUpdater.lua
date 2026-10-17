@@ -1,11 +1,8 @@
 --!strict
-
--- Discord: ianfinity 728976729590464554
--- Roblox: ianfinity01
-
 local ReplicatedStorage = game:GetService("ReplicatedStorage") -- Get ReplicatedStorage
 local RunService = game:GetService("RunService") -- Get RunService for RenderStepped
 local Players = game:GetService("Players") -- Get Players
+local TweenService = game:GetService("TweenService") -- Get TweenService for animations
 local REMOTES = ReplicatedStorage.BoardRemotes -- Get the Remote Event that will be used for data updates
 local GUI = script.Parent -- Get the gui that will be updated
 local UPDATER_GUI = GUI.Parent.Updater -- Get the GUI where the user can send and remove entries
@@ -19,7 +16,6 @@ local TOP_ERR = TOP_SCROLL.ERROR -- The error label for the top scrolling frame
 local AROUND_ERR = AROUND_SCROLL.ERROR -- The error label for the around the player scrolling frame
 local AROUND_NF = AROUND_SCROLL.NOTFOUND -- The label for the not found error
 
--- main code
 local refresh_target: number? = nil -- The timestamp at which the next leaderboard refresh will occur
 local board_size: number? = nil -- The total number of entries (displayed or not) on the leaderboard
 local top_entries: {TextButton} = {} -- The entries in the top scrolling frame
@@ -27,6 +23,18 @@ local around_entries: {TextButton} = {} -- The entries in the around scrolling f
 local name_cache: {[number]: string} = {} -- A cache of user-id to username
 local profile_cache: {[number]: string} = {} -- A cache of user-id to profile picture
 local out_of_bounds_frame: typeof(ENTRY_TEMPLATE)? = nil -- A frame to display when the player is out of the bounds of the leaderboard
+
+local text_animations: {[TextLabel]: TextAnimationState} = {} -- A table that stores a text label and its animation state
+local MAX_ANIMATION_SPEED: number = 10 -- The minimum number of updates that can be typed per second
+local MAX_ANIMATION_LEN: number = 2 -- The longest the typing animation can play for
+local ANIMATION_EASING: Enum.EasingStyle = Enum.EasingStyle.Exponential -- The style to smooth the animation with
+local ANIMATION_DIRECTION: Enum.EasingDirection = Enum.EasingDirection.InOut -- The direction to smooth the animation with
+
+type TextAnimationState = { -- A type definition for text animation states
+	start: number, -- The number that the animation started from
+	target: number, -- The number that is being animated to
+	t: number -- The time elapsed in the animation
+}
 
 -- Called when the player clicks on a leaderboard entry
 function on_click(id: number)
@@ -118,7 +126,12 @@ REMOTES.TopUpdate.OnClientEvent:Connect(function(entries) -- When the server not
 		frame.LayoutOrder = rank -- Make sure the entries display in order of their ranks
 		frame.Left.Rank.Text = `#{rank}` -- Display the rank of the entry
 		frame.Left.User.Text = "--" -- Put a placeholder for their username while load_entry_name_profile loads it
-		frame.Right.Value.Text = `{points}{BOARD_VALUE_SUFFIX}` -- Display the user's points with the points suffix
+		frame.Right.Value.Text = `0{BOARD_VALUE_SUFFIX}` -- Prepare the points animation so it starts at zero
+		text_animations[frame.Right.Value] = { -- Set up the animation to animate the point value
+			start = 0, -- Start counting at zero
+			target = points, -- Count up to points
+			t = 0 -- Time starts at zero
+		}
 		
 		frame.Activated:Connect(function() -- Whenever this entry is clicked
 			on_click(id) -- Activate the on click function for the player's entry
@@ -172,7 +185,12 @@ REMOTES.AroundUpdate.OnClientEvent:Connect(function(cached, data) -- When the se
 		frame.LayoutOrder = rank -- Make sure that the entries in the frame are ordered by rank
 		frame.Left.Rank.Text = `#{rank}` -- Display the rank of the entry
 		frame.Left.User.Text = "--" -- Put a placeholder for their username while load_entry_name_profile loads it
-		frame.Right.Value.Text = `{points}{BOARD_VALUE_SUFFIX}` -- Display the user's points with the points suffix
+		frame.Right.Value.Text = `0{BOARD_VALUE_SUFFIX}` -- Prepare the animation so it starts at 0
+		text_animations[frame.Right.Value] = { -- Set up the animation to animate the point value
+			start = 0, -- Start counting at zero
+			target = points, -- Count up to points
+			t = 0 -- Time starts at zero
+		}
 		
 		frame.Activated:Connect(function() -- Whenever this entry is clicked
 			on_click(id) -- Activate the on click function for the player's entry
@@ -201,7 +219,30 @@ REMOTES.RefreshUpdate.OnClientEvent:Connect(function(target_time, size) -- When 
 	refresh_target = target_time -- Update the timestamp of the next update
 end)
 
-RunService.RenderStepped:Connect(function() -- Every frame
+RunService.RenderStepped:Connect(function(dt) -- Every frame
+	for label, info in text_animations do -- For every animated text label and its animation state
+		if not label.Parent or not label.Parent.Parent then -- If the label no longer exists
+			text_animations[label] = nil -- Remove the label from the animation list
+			continue -- Skip the rest of the loop
+		end
+
+		local start = info.start -- Get the value the animation starts at
+		local target = info.target -- Get the value to animate towards
+
+		local animation_length = math.clamp(target/MAX_ANIMATION_SPEED, 0, MAX_ANIMATION_LEN) -- Calculate the animation length so that it is properly bounded
+		info.t = math.clamp(info.t + dt, 0, animation_length) -- Progress the timer by the amount of time that has passed
+
+		local alpha = info.t/animation_length -- Calculate the animation progress
+		local eased_alpha = TweenService:GetValue(alpha, ANIMATION_EASING, ANIMATION_DIRECTION) -- Ease the alpha so the animation looks smoother and starts/stops less abruptly
+		local new_value = math.round(math.lerp(start, target, eased_alpha)) -- Calculate the value to display
+
+		label.Text = `{new_value}{BOARD_VALUE_SUFFIX}` -- Display the new value
+
+		if info.t == animation_length then -- If the animation is done
+			text_animations[label] = nil -- Remove the label from the animation list
+		end
+	end
+	
 	if not refresh_target then -- If there isn't a known time for the next update
 		REFRESH_TIMER.Text = "" -- Hide the refresh timer
 		return -- Don't do anything else
