@@ -5,10 +5,12 @@ local Players = game:GetService("Players") -- Get Players
 local TweenService = game:GetService("TweenService") -- Get TweenService for animations
 local REMOTES = ReplicatedStorage.BoardRemotes -- Get the Remote Event that will be used for data updates
 local GUI = script.Parent -- Get the gui that will be updated
-local UPDATER_GUI = GUI.Parent.Updater -- Get the GUI where the user can send and remove entries
+local UPDATER_GUI = GUI.Parent:WaitForChild("Updater") -- Get the GUI where the user can send and remove entries
 
 local ENTRY_TEMPLATE = GUI.EntryTemplate -- Get the template for entries on the leaderboard
 local BOARD_VALUE_SUFFIX = " pts" -- The suffix for board values
+local TITLE = GUI.Title -- The text label for the title of the leaderboard
+local TITLE_SHINE = TITLE.UIGradient
 local TOP_SCROLL = GUI.Top.ScrollingFrame -- The scrolling frame for the top entires on the leaderboard
 local AROUND_SCROLL = GUI.Around.ScrollingFrame -- The scrolling frame for entries around the player on the leaderboard
 local REFRESH_TIMER = GUI.Refresh -- The text label that shows the time until the leaderboard refreshes
@@ -25,10 +27,15 @@ local profile_cache: {[number]: string} = {} -- A cache of user-id to profile pi
 local out_of_bounds_frame: typeof(ENTRY_TEMPLATE)? = nil -- A frame to display when the player is out of the bounds of the leaderboard
 
 local text_animations: {[TextLabel]: TextAnimationState} = {} -- A table that stores a text label and its animation state
+local title_shine_t: number = 0 -- The current time in the title shine animation
 local MAX_ANIMATION_SPEED: number = 10 -- The minimum number of updates that can be typed per second
 local MAX_ANIMATION_LEN: number = 2 -- The longest the typing animation can play for
 local ANIMATION_EASING: Enum.EasingStyle = Enum.EasingStyle.Exponential -- The style to smooth the animation with
 local ANIMATION_DIRECTION: Enum.EasingDirection = Enum.EasingDirection.InOut -- The direction to smooth the animation with
+local TITLE_SHINE_MIN_OFFSET: number = -0.2 -- The position for the shine to start from when it animates
+local TITLE_SHINE_MAX_OFFSET: number = 0.8 -- The position for the shine to end at when it animates
+local TITLE_SHINE_DELAY: number = 3 -- The time between title shine animations
+local TITLE_SHINE_LENGTH: number = 0.35 -- The length of the shine animation
 
 type TextAnimationState = { -- A type definition for text animation states
 	start: number, -- The number that the animation started from
@@ -219,7 +226,24 @@ REMOTES.RefreshUpdate.OnClientEvent:Connect(function(target_time, size) -- When 
 	refresh_target = target_time -- Update the timestamp of the next update
 end)
 
-RunService.RenderStepped:Connect(function(dt) -- Every frame
+function HandleShineAnimation(dt: number) -- Animates the title so that it shines on occasion
+	title_shine_t += dt -- Add the time that has passed to the animation time
+	
+	local full_duration = TITLE_SHINE_DELAY + TITLE_SHINE_DELAY -- The full length of the animation (delay + shine)
+	
+	while title_shine_t > full_duration do -- If the animation has passed the full duration
+		title_shine_t -= full_duration -- Loop it back around to the start
+	end
+	
+	if title_shine_t < TITLE_SHINE_DELAY then -- If the shine hasn't happened yet
+		TITLE_SHINE.Offset = Vector2.new(TITLE_SHINE_MIN_OFFSET, 0) -- Set the UIGradient offset so that the shine isn't visible
+	else -- Otherwise, if the shine is in progress
+		local alpha = (title_shine_t - TITLE_SHINE_DELAY)/TITLE_SHINE_LENGTH -- Calculate the progress of the shine portion of the animation
+		TITLE_SHINE.Offset = Vector2.new(math.lerp(TITLE_SHINE_MIN_OFFSET, TITLE_SHINE_MAX_OFFSET, alpha), 0) -- Offset the gradient to move the shine across the title, animating it
+	end
+end
+
+function HandleTextAnimations(dt: number) -- Animate text so it types up to the correct value
 	for label, info in text_animations do -- For every animated text label and its animation state
 		if not label.Parent or not label.Parent.Parent then -- If the label no longer exists
 			text_animations[label] = nil -- Remove the label from the animation list
@@ -242,15 +266,25 @@ RunService.RenderStepped:Connect(function(dt) -- Every frame
 			text_animations[label] = nil -- Remove the label from the animation list
 		end
 	end
-	
+end
+
+function HandleRefreshTimer() -- Displays the time left until the next update/refresh
 	if not refresh_target then -- If there isn't a known time for the next update
 		REFRESH_TIMER.Text = "" -- Hide the refresh timer
 		return -- Don't do anything else
 	end
-	
+
 	local delta = math.max(refresh_target - workspace:GetServerTimeNow(), 0) -- Calculate the number of seconds until the timestamp of the next update (and don't allow it to be negative)
 	local seconds = math.floor(delta%60) -- Take the portion of the total seconds that isn't minutes
 	local minutes = math.floor(delta/60) -- Take the minutes out of the seconds
-	
+
 	REFRESH_TIMER.Text = string.format("REFRESH IN %02i:%02i", minutes, seconds) -- Display the new time information
+end
+
+RunService.RenderStepped:Connect(function(dt) -- Every frame
+	HandleTextAnimations(dt) -- Step the text animations
+	
+	HandleShineAnimation(dt) -- Step the title shine animation
+	
+	HandleRefreshTimer() -- Update the refresh timer
 end)
