@@ -1,12 +1,17 @@
 --!strict
+-- Discord: @ianfinity (728976729590464554)
+-- Roblox: @ianfinity01 (3558408338)
+
+-- Service definitions
 local ReplicatedStorage = game:GetService("ReplicatedStorage") -- Get ReplicatedStorage
 local RunService = game:GetService("RunService") -- Get RunService for RenderStepped
 local Players = game:GetService("Players") -- Get Players
 local TweenService = game:GetService("TweenService") -- Get TweenService for animations
+
+-- Constant definitions
 local REMOTES = ReplicatedStorage.BoardRemotes -- Get the Remote Event that will be used for data updates
 local GUI = script.Parent -- Get the gui that will be updated
 local UPDATER_GUI = GUI.Parent:WaitForChild("Updater") -- Get the GUI where the user can send and remove entries
-
 local ENTRY_TEMPLATE = GUI.EntryTemplate -- Get the template for entries on the leaderboard
 local BOARD_VALUE_SUFFIX = " pts" -- The suffix for board values
 local TITLE = GUI.Title -- The text label for the title of the leaderboard
@@ -18,6 +23,7 @@ local TOP_ERR = TOP_SCROLL.ERROR -- The error label for the top scrolling frame
 local AROUND_ERR = AROUND_SCROLL.ERROR -- The error label for the around the player scrolling frame
 local AROUND_NF = AROUND_SCROLL.NOTFOUND -- The label for the not found error
 
+-- Variable definitions
 local refresh_target: number? = nil -- The timestamp at which the next leaderboard refresh will occur
 local board_size: number? = nil -- The total number of entries (displayed or not) on the leaderboard
 local top_entries: {TextButton} = {} -- The entries in the top scrolling frame
@@ -26,6 +32,7 @@ local name_cache: {[number]: string} = {} -- A cache of user-id to username
 local profile_cache: {[number]: string} = {} -- A cache of user-id to profile picture
 local out_of_bounds_frame: typeof(ENTRY_TEMPLATE)? = nil -- A frame to display when the player is out of the bounds of the leaderboard
 
+-- Animation variable/constant definitions
 local text_animations: {[TextLabel]: TextAnimationState} = {} -- A table that stores a text label and its animation state
 local title_shine_t: number = 0 -- The current time in the title shine animation
 local MAX_ANIMATION_SPEED: number = 10 -- The minimum number of updates that can be typed per second
@@ -37,6 +44,7 @@ local TITLE_SHINE_MAX_OFFSET: number = 0.8 -- The position for the shine to end 
 local TITLE_SHINE_DELAY: number = 3 -- The time between title shine animations
 local TITLE_SHINE_LENGTH: number = 0.35 -- The length of the shine animation
 
+-- Type used to store information about the animation of different text labels in one data structure
 type TextAnimationState = { -- A type definition for text animation states
 	start: number, -- The number that the animation started from
 	target: number, -- The number that is being animated to
@@ -45,12 +53,13 @@ type TextAnimationState = { -- A type definition for text animation states
 
 -- Called when the player clicks on a leaderboard entry
 function on_click(id: number)
-	-- Update the entry-updater gui to allow the user to edit the entry
+	-- Update the entry-updater gui to allow the user to edit the entry easily. Makes it easy to access the user id of a player and edit without having to dig for a user id and manually put it in.
 	UPDATER_GUI.SEND.ID.Text = tostring(id) -- Update the entry-updating text box to display the id of the entry you clicked on
 	UPDATER_GUI.REMOVE.ID.Text = tostring(id) -- Update the entry-removal text box to display the id of the entry you clicked on
 end
 
 -- Loads the username and profile picture onto an entry frame by their user-id
+-- Will read from cache if possible to speed up the process; otherwise, will load the data from Roblox's servers asynchronously on another thread, populating the frame once the data is available
 function load_entry_name_profile(id: number, frame: typeof(ENTRY_TEMPLATE))
 	if name_cache[id] then -- Check if the username of the id is cached
 		frame.Left.User.Text = name_cache[id] -- If so, update the entry's username label to show their username
@@ -85,6 +94,7 @@ function load_entry_name_profile(id: number, frame: typeof(ENTRY_TEMPLATE))
 end
 
 -- Displays the frame that appears when the player is out of the bounds of the leaderboard
+-- Used when the player's score is too low to be on the leaderboard so that some helpful information can be displayed even still
 function display_out_of_bounds_frame()
 	local frame = ENTRY_TEMPLATE:Clone() -- Clone the entry template
 	frame.Visible = true -- Make the entry visible
@@ -104,8 +114,12 @@ function display_out_of_bounds_frame()
 	out_of_bounds_frame = frame -- Set the out_of_bounds_frame to reflect that this is the out of bounds entry
 	table.insert(around_entries, frame) -- Add the frame to the around entries list so it will be properly cleaned up
 end
+
 -- All these comments are excruciating
-REMOTES.TopUpdate.OnClientEvent:Connect(function(entries) -- When the server notifies of an update to the top entries of the leaderboard
+
+-- When the server notifies of an update to the top entries of the leaderboard
+-- Update the scrolling frame that displays the top users in the board to display the updated information
+REMOTES.TopUpdate.OnClientEvent:Connect(function(entries)
 	-- Remove all existing entries so that we can populate the board with the new ones
 	for _, entry in top_entries do -- For every entry in the current top entries list
 		entry:Destroy() -- Delete the entry
@@ -149,8 +163,12 @@ REMOTES.TopUpdate.OnClientEvent:Connect(function(entries) -- When the server not
 		table.insert(top_entries, frame) -- Add the frame to the top entries list so it will be properly cleaned up
 	end
 end)
+
 -- Oh god help me I'm barely half way done
-REMOTES.AroundUpdate.OnClientEvent:Connect(function(cached, data) -- When the server notifies of an update to the entries around you on the leaderboard
+
+-- When the server notifies of an update to the entries around you on the leaderboard
+-- Update the scrolling frame that displays the information about users around you on the board so that it displays up-to-date information. Handles if you are not on the board as well.
+REMOTES.AroundUpdate.OnClientEvent:Connect(function(cached, data)
 	-- Remove all existing entries so that we can populate the board with the new ones
 	for _, entry in around_entries do -- For every entry in the current around entries list
 		entry:Destroy() -- Delete the entry
@@ -213,7 +231,9 @@ REMOTES.AroundUpdate.OnClientEvent:Connect(function(cached, data) -- When the se
 	end
 end)
 
-REMOTES.RefreshUpdate.OnClientEvent:Connect(function(target_time, size) -- When the server provides new board info, including a board size and the time of the next update
+-- When the server provides new board info, including a board size and the time of the next update
+-- Also updates the out_of_bounds frame so it maintains the most up-to-date information
+REMOTES.RefreshUpdate.OnClientEvent:Connect(function(target_time, size)
 	board_size = size -- Store the board size for later
 
 	if out_of_bounds_frame then -- If the out of bounds frame is being currently displayed
@@ -226,7 +246,8 @@ REMOTES.RefreshUpdate.OnClientEvent:Connect(function(target_time, size) -- When 
 	refresh_target = target_time -- Update the timestamp of the next update
 end)
 
-function HandleShineAnimation(dt: number) -- Animates the title so that it shines on occasion
+-- Animates the title so that it shines on occasion
+function HandleShineAnimation(dt: number)
 	title_shine_t += dt -- Add the time that has passed to the animation time
 	
 	local full_duration = TITLE_SHINE_DELAY + TITLE_SHINE_DELAY -- The full length of the animation (delay + shine)
@@ -243,7 +264,9 @@ function HandleShineAnimation(dt: number) -- Animates the title so that it shine
 	end
 end
 
-function HandleTextAnimations(dt: number) -- Animate text so it types up to the correct value
+-- Animate text so it types up to the correct value
+-- This is used for the points labels on the board to make it look nicer
+function HandleTextAnimations(dt: number)
 	for label, info in text_animations do -- For every animated text label and its animation state
 		if not label.Parent or not label.Parent.Parent then -- If the label no longer exists
 			text_animations[label] = nil -- Remove the label from the animation list
@@ -268,7 +291,8 @@ function HandleTextAnimations(dt: number) -- Animate text so it types up to the 
 	end
 end
 
-function HandleRefreshTimer() -- Displays the time left until the next update/refresh
+-- Displays the time left until the next update/refresh by comparing the current time to the server-provided next-update time
+function HandleRefreshTimer()
 	if not refresh_target then -- If there isn't a known time for the next update
 		REFRESH_TIMER.Text = "" -- Hide the refresh timer
 		return -- Don't do anything else
@@ -281,7 +305,9 @@ function HandleRefreshTimer() -- Displays the time left until the next update/re
 	REFRESH_TIMER.Text = string.format("REFRESH IN %02i:%02i", minutes, seconds) -- Display the new time information
 end
 
-RunService.RenderStepped:Connect(function(dt) -- Every frame
+-- Every frame
+-- Handle all the code that needs to be stepped (animations and timers)
+RunService.RenderStepped:Connect(function(dt)
 	HandleTextAnimations(dt) -- Step the text animations
 	
 	HandleShineAnimation(dt) -- Step the title shine animation
